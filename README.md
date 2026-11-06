@@ -1,3 +1,14 @@
+> **本仓库是 fork**：基于 [Imzl-zl/dsh-redo](https://github.com/Imzl-zl/dsh-redo)（MIT，原作者 Imzl-zl）。
+>
+> 本 fork 额外增加了 **「取消重写」**：点 ✎ 进入重写后，消息行**不再消失**，动作行末尾出现「取消重写」；
+> 点击即发送 `/redo off` 并清空输入框，消息原本的位置保持不变。改动细节见 [`PATCH.md`](./PATCH.md)。
+>
+> 上游代码与 MIT 许可原样保留；本 fork 的改动集中在 `lib/client.js`。
+> Fork of [Imzl-zl/dsh-redo](https://github.com/Imzl-zl/dsh-redo) (MIT) with one addition: a visible
+> **"Cancel rewrite"** control, so leaving an edit is possible.
+
+---
+
 <div align="center">
   <img src="assets/logo.svg" width="112" height="112" alt="dsh-redo logo">
   <h1>dsh-redo</h1>
