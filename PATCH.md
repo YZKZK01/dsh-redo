@@ -1,4 +1,4 @@
-# 本 fork 的改动（源码级）
+﻿# 本 fork 的改动（源码级）
 
 基于上游 `Imzl-zl/dsh-redo` **v0.4.1**（MIT，作者 Imzl-zl）。改动全部落在 `src/`，`lib/` 是
 `npm run build` 的产物，**不提交**（与上游一致，`.gitignore` 已忽略）。
@@ -33,7 +33,20 @@
 - `src/client/intervals.ts` 换成 0.4.3 版本（新增 `isRedoRewrite`：只有空 content 的 `system/message` 才算本插件的撤回）；
 - `test/intervals.test.ts` 换成 0.4.3 版本，锁定"harness 的 replace 不隐藏 Turn"。
 
-## 3. 为什么没有直接升到 0.4.3
+## 3. 跨版本附件读取（0.2.1 ↔ 0.2.2）
+
+上游 0.4.2 的图片修复依赖 `ImageAttachmentRef`，而 0.2.1 只认 attachment id。本 fork 不抬
+`engines.dsh`，改成运行时两代兼容：
+
+```ts
+const viaRef = await session.readAttachment(image)      // 0.2.2-rc.1+
+if (viaRef.ok) return viaRef
+return session.readAttachment(image.attachmentId)       // 0.2.1 回退
+```
+
+`arm()`（编辑回填图片草稿）与 `resend()`（重新生成带图）两条路径都走这个 helper。
+
+## 4. 为什么没有直接升到 0.4.3
 
 上游 0.4.2 把 `engines.dsh` 抬到了 `>=0.2.2-rc.1`，原因是 `ImageAttachmentRef` 的附件读取 API 只在
 0.2.2-rc.1 起才完整（旧版只接受 attachmentId）。而当前宿主是 **DSH 0.2.1-rc.2**。
@@ -44,7 +57,7 @@
 - 只回移与附件 API 无关的 0.4.3 区间修复；
 - **不**回移 0.4.2 的图片重读修复——那需要升级宿主，等 DSH 升到 0.2.2-rc.1 再跟随。
 
-## 4. 构建与验证
+## 5. 构建与验证
 
 ```sh
 npm install
@@ -56,7 +69,7 @@ npm run build       # 产出 lib/index.js + lib/client.js（不提交）
 本 fork 实际安装用的构建：`lib/client.js` 39,114 字节，含 `isRedoRewrite`、`cancelArm`、`cancelPending`；
 包版本标记为 `0.4.1-fork.2`。
 
-## 5. 已知限制
+## 6. 已知限制
 
 - 输入框已有草稿、或该消息之后仍有轮次时，点 ✎ 仍会先弹上游自带的确认框；确认后才进入"已武装"状态，
   才会出现「取消重写」（这是上游既有交互，本次未改动）。
