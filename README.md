@@ -1,107 +1,132 @@
-> **本仓库是 fork**：基于 [Imzl-zl/dsh-redo](https://github.com/Imzl-zl/dsh-redo)（MIT，原作者 Imzl-zl）。
->
-> 本 fork 额外增加了 **「取消重写」**：点 ✎ 进入重写后，消息行**不再消失**，动作行末尾出现「取消重写」；
-> 点击即发送 `/redo off` 并清空输入框，消息原本的位置保持不变。改动细节见 [`PATCH.md`](./PATCH.md)。
->
-> 上游代码与 MIT 许可原样保留；本 fork 的改动集中在 `lib/client.js`。
-> Fork of [Imzl-zl/dsh-redo](https://github.com/Imzl-zl/dsh-redo) (MIT) with one addition: a visible
-> **"Cancel rewrite"** control, so leaving an edit is possible.
+# dsh-redo（YZKZK01 fork）
+
+> 基于 [Imzl-zl/dsh-redo](https://github.com/Imzl-zl/dsh-redo)（MIT，作者 Imzl-zl）的**自维护 fork**。
+> 给发出的每条消息加上「编辑重发 / 重新生成」，并把**放弃编辑**的入口补上。
+> 上游仓库与本 fork 的差异见下表；本仓库的改动全部落在 `src/`，`lib/` 是构建产物、不提交。
 
 ---
 
-<div align="center">
-  <img src="assets/logo.svg" width="112" height="112" alt="dsh-redo logo">
-  <h1>dsh-redo</h1>
-  <p>编辑或重试已经发出去的用户消息，并原地重新生成——不新建会话、不重开对话。</p>
-  <p>
-    <a href="https://www.npmjs.com/package/dsh-redo"><img src="https://img.shields.io/npm/v/dsh-redo?style=flat-square&color=CB3837" alt="npm version"></a>
-    <a href="https://www.npmjs.com/package/dsh-redo"><img src="https://img.shields.io/npm/dm/dsh-redo?style=flat-square" alt="npm downloads"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3da639?style=flat-square" alt="License: MIT"></a>
-    <img src="https://img.shields.io/badge/DSH-0.2.x-4D6BFE?style=flat-square" alt="DeepSeek Harness 0.2.x">
-    <img src="https://img.shields.io/badge/platform-web-6B7280?style=flat-square" alt="Platform: web">
-    <img src="https://img.shields.io/badge/plugin-cordis-8B5CF6?style=flat-square" alt="Plugin: cordis">
-    <a href="https://github.com/Imzl-zl/dsh-redo/actions/workflows/ci.yml"><img src="https://github.com/Imzl-zl/dsh-redo/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  </p>
-</div>
+## 这个 fork 做了什么
+
+| 能力 | 上游 0.4.1 | 本 fork |
+|---|---|---|
+| 编辑重发（撤回后从原位置重写） | ✅ | ✅ |
+| 重新生成（原样重发，不经过输入框） | ✅ | ✅ |
+| **取消重写**（点 ✎ 后反悔） | ❌ 消息行立刻隐藏，没有返回入口 | ✅ **消息行保持可见 + 动作行出现「取消重写」** |
+| 长会话压缩后整段对话空白 | ❌（issue #1） | ✅ 回移 0.4.3 的区间修复 |
+| 图片消息编辑/重试 | 0.2.1 上读不回（只传 id） | ✅ 双代兼容读取（ref → 失败回退 id） |
+
+### 「取消重写」怎么用
+
+1. 在消息动作行点 ✎（编辑重发）；
+2. 消息**不会消失**，动作行末尾出现 **「取消重写」**，原文已回填输入框；
+3. 点「取消重写」= 清空输入框 + 撤销宿主侧的 `/redo` 登记，消息原样留在时间线里；
+4. 若直接改完发送，则按上游语义在该位置重写对话。
 
 ---
-
-## 这是什么
-
-DSH 的会话是只追加的日志，消息发出去就没有"改一下再发"的入口。**dsh-redo** 把这件事补上：选中任意一条
-自己发过的消息，改文字、换图片，或者原样再来一次，模型上下文会**原地回到那条消息之前**并重新生成。
-
-- 消息发错了（错字、贴错内容、图配错）→ 改完重发。
-- 回答不满意或渠道抽风 → 原样重发，不用等它失败。
-- 想换个问法继续同一段对话 → 从任意一条消息重写，后面的内容作废。
-
-## 功能
-
-- **重新生成**：任意一条用户消息都能重发，一键，不经过输入框。
-- **编辑重发**：消息连同它的回答立刻从对话里消失，文字和图片回到**底部输入框**；改完按发送，旧的那段被替换，
-  新的内容落在原位——不会多出一条。
-- **图片跟着走**：存的图读回字节、重新挂成草稿，发送时一起上送。
-- **破坏性操作有确认**：撤回中段消息前会说明之后有几轮离开上下文；输入框本来有内容时再问一句是否替换。
-- **生成中禁用**：回答还在生成时按钮置灰，先把当前回答处理掉。
-
-## 安装
-
-需要 DSH `>= 0.2.0-rc.1 < 0.3.0`，在 Web GUI 里使用。发布物已含构建好的 `lib/`，不需要自己 build。
-
-```sh
-dsh plugin --profile <profile> add dsh-redo
-dsh --profile <profile>
-```
-
-从源码装（改代码时用）：
-
-```sh
-git clone https://github.com/Imzl-zl/dsh-redo.git && cd dsh-redo
-npm install && npm run build
-dsh plugin --profile <profile> add <本仓库绝对路径>
-```
-
-## 使用
-
-1. 鼠标移到任意一条**自己发的消息**上，气泡下方出现操作行。
-2. **重新生成**：原样重发，一键完成。
-3. **编辑重发**：这条消息立刻从对话里消失，内容回到输入框。中段消息会先确认；输入框非空时会问是否替换。
-4. 改完按发送——这一次发送就是在重写那段对话。
-
-编辑用的是原生 composer，`@` 引用、斜杠命令、图片预览、Esc 撤销都是原生行为。
-
-## 限制
-
-- **点了不发会还原**：登记的有效期是 5 分钟，过期或刷新后那条消息重新出现——因为它确实还没被撤回。
-- **文件附件不支持**：带文件的消息两个按钮置灰，避免静默丢内容；图片不受影响。
-- **日志里仍留着原文**：会话是只追加的，撤回是追加一条遮蔽记录，不是删除。模型和界面都已生效，
-  但用脚本回放日志仍能看到被撤回的那条文本。
-- **很久以前的重写可能不再隐藏**：界面上的隐藏依赖已加载的会话窗口；一次很早的替换若已落到窗口之外，
-  刷新后旧消息会重新显示（模型上下文仍然正确）。
 
 ## 兼容性
 
-| 项目 | 说明 |
-| --- | --- |
-| DSH | `>= 0.2.0-rc.1 < 0.3.0`，实测 `0.2.1-rc.2` / `0.2.1-rc.3` |
-| 平台 | Web GUI |
-| 扩展点 | keyed slot `conversation.chat.node`、`agent/pre-step`、`agent/request`、`ctx.commands` |
+| 宿主版本 | 状态 | 说明 |
+|---|---|---|
+| **DSH `0.2.1-rc.2`** | ✅ 主力验证 | 附件按 id 读取（回退路径） |
+| **DSH `0.2.2-rc.1`** | ✅ 支持 | 附件按完整 `ImageAttachmentRef` 读取（优先路径） |
+| 更早（`<0.2.1-rc.2`） | ❌ | `renderFactorySlot` / `UserContentData` 不存在 |
+| 更新版本 | 未验证 | 见下方「维护节奏」 |
 
-## 开发
+`package.json` 的 `engines.dsh` 保持 `>=0.2.1-rc.2 <0.3.0`：一次构建同时服务两代宿主，
+图片读取在运行时按能力回退，不靠"装了哪个版本"分叉。
+
+> 上游 0.4.2 把下界抬到 `>=0.2.2-rc.1`，因为它只用新版附件 API。本 fork 不抬下界，
+> 改用「ref 优先、id 回退」，所以 0.2.1 也能用图片编辑。
+
+---
+
+## 安装
+
+**方式一：插件页填仓库地址**
+
+```
+https://github.com/YZKZK01/dsh-redo
+```
+
+前提：仓库里要有构建产物 `lib/`。本仓库按上游约定**不提交 `lib/`**，所以这种方式会先构建；
+如果安装器只取仓库内容而不构建，请改用方式二/三。
+
+**方式二：本地目录（推荐自用）**
 
 ```sh
 npm install
-npm test            # node --test，直接跑 TypeScript 源码
-npm run typecheck
-npm run build       # 产物 lib/ 不入库
+npm run build          # 产出 lib/index.js + lib/client.js
 ```
 
-设计与实现细节见 [docs/design.md](docs/design.md)，变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+把整个目录（含 `lib/`、`cordis.patch.yml`、`package.json`）放进 profile 的 `vendor/`，
+再让 `node_modules/<name>` 指向它（Windows 用 `mklink /J`），并在 `package.json` 里声明
+`"dsh-redo": "file:./vendor/dsh-redo"` 且把 `dsh-redo` 加进 `dsh.profile.bundles`。
 
-## 友链
+**方式三：npm 包（需要先发布）**
 
-<a href="https://linux.do"><img src="assets/linuxdo.png" width="24" height="24" alt="Linux.do" align="absmiddle"> <strong>Linux.do</strong></a>
+```sh
+npm pack               # 生成 dsh-redo-0.4.1-fork.x.tgz
+# 或发布到自己的 scope（不要占用上游的 dsh-redo 包名）
+```
 
-## License
+---
 
-[MIT](LICENSE)
+## 构建与验证
+
+```sh
+npm install
+npm run typecheck      # tsc --noEmit
+npm test               # node --test，直接跑 TS 源码
+npm run build          # lib/index.js + lib/client.js
+```
+
+本 fork 当前状态：`typecheck` 通过、**37 项测试全过**、构建产物 `lib/client.js` ≈ 39.7 KB，
+包含 `isRedoRewrite`（区间修复）、`cancelArm` / `cancelPending`（取消重写）、跨版本附件读取。
+
+---
+
+## 为什么没有整包升级到 0.4.3
+
+| 版本 | `engines.dsh` | 原因 |
+|---|---|---|
+| 0.4.1 | `>=0.2.1-rc.2` | 当前基线 |
+| 0.4.2 / 0.4.3 | `>=0.2.2-rc.1` | 只认完整 `ImageAttachmentRef`，旧宿主读不了 |
+
+本 fork 的做法：**保持 0.4.1 的 API 面 + 回移 0.4.3 的区间修复 + 自己实现双代附件读取**。
+这样在 DSH 还停在 0.2.1-rc.2 时也能拿到上游最有价值的那条修复（长会话不再空白）。
+
+---
+
+## 已知限制
+
+- 输入框已有草稿、或该消息之后还有轮次时，点 ✎ 仍会先弹上游自带的确认框；确认后才进入"已武装"状态。
+- 「取消重写」只清武装与输入框，不会恢复已被重发覆盖的旧内容（superseded 语义属上游设计）。
+- `InputActions` 上没有 `focus()`，取消后焦点不会自动回到输入框。
+- 文件（非图片）消息仍不支持编辑/重试（上游限制）。
+
+---
+
+## 维护节奏（DSH 一更新就跟着动）
+
+每次 DSH 升级后按这个清单走一遍：
+
+1. `npm view dsh-redo version` / 看上游 release：有没有新版本；
+2. 有新版：下载对应 tag 源码，`git diff` 看 `src/` 变化，把本 fork 的三处改动重放：
+   - `src/client/index.tsx`：ARMED store、`arm()` 不隐藏、动作行取消按钮、跨代附件读取；
+   - `src/client/locales.ts`：`action.cancel`；
+   - `src/client/intervals.ts`：`isRedoRewrite` 区间修复（若上游已含则跳过）；
+3. `npm install && npm run typecheck && npm test && npm run build`；
+4. 换 profile `vendor/` 里的 `lib/`，重启 DSH；
+5. 验证三件事：✎ 后行还在 + 有「取消重写」；点击后草稿清空、行还在；压缩过的长会话不空白；
+6. 顺手看 `engines.dsh` 是否仍覆盖当前宿主。
+
+---
+
+## 上游与许可
+
+- 上游：https://github.com/Imzl-zl/dsh-redo （MIT，作者 Imzl-zl）
+- 上游 issue #1：长会话压缩后 transcript 被清空（0.4.3 修复）
+- 本 fork：https://github.com/YZKZK01/dsh-redo
+- 许可：MIT，保留原版权与许可文本；本 fork 的改动同样以 MIT 提供。
