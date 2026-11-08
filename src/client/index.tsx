@@ -1154,8 +1154,18 @@ export function apply(ctx: Context): void {
         // read before the arm: a failed read must not leave the Host pointed at
         // a message whose images can no longer be recovered.
         const files: File[] = []
+        // DSH 0.2.2-rc.1 verifies the complete `ImageAttachmentRef`; earlier
+        // hosts accept only the bare id. Try the reference first, then fall
+        // back, so one build serves both host generations.
+        const readImage = async (image: ImageAttachmentRef) => {
+          const viaRef = await session.readAttachment(image)
+          if (viaRef.ok) return viaRef
+          const id = (image as { attachmentId?: unknown }).attachmentId
+          if (typeof id !== 'string') return viaRef
+          return session.readAttachment(id as unknown as ImageAttachmentRef)
+        }
         for (const [index, image] of images.entries()) {
-          const stored = await session.readAttachment(image.attachmentId)
+          const stored = await readImage(image)
           if (!stored.ok) return { ok: false, code: 'attachment' }
           files.push(new File(
             [stored.value.data],
@@ -1193,10 +1203,18 @@ export function apply(ctx: Context): void {
         if (session.getSnapshot().running) return { ok: false, code: 'running' }
         // Stored images travel as bytes; the Host admits them into fresh durable
         // refs. A file part cannot ride this path (it needs a receipt from a new
-        // upload).
+        // upload). Same two-generation read as the edit path: the reference on
+        // 0.2.2-rc.1 and newer, the bare id on 0.2.1.
+        const readImage = async (image: ImageAttachmentRef) => {
+          const viaRef = await session.readAttachment(image)
+          if (viaRef.ok) return viaRef
+          const id = (image as { attachmentId?: unknown }).attachmentId
+          if (typeof id !== 'string') return viaRef
+          return session.readAttachment(id as unknown as ImageAttachmentRef)
+        }
         const wire = await Promise.all(parts.map(async (part) => {
           if (part.type === 'text') return { type: 'text', text: part.text }
-          const stored = await session.readAttachment(part.attachment.attachmentId)
+          const stored = await readImage(part.attachment)
           if (!stored.ok) return undefined
           return {
             type: 'image',
