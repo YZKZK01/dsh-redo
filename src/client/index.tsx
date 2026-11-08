@@ -170,6 +170,17 @@ export interface RedoInjected {
    *   have to leave the screen along with the replaced message.
    */
   retractionTurns: () => readonly number[]
+  /**
+   * @param seq - message seq to test.
+   * @returns whether the message is armed for a rewrite (registered, not sent).
+   */
+  isPending: (seq: number) => boolean
+  /** Abandon the armed rewrite for `target`: disarm the Host and forget it. */
+  cancelArm: (target: number) => void
+  /** Subscribe to this Session's arm-state changes. */
+  subscribeArmed: (listener: () => void) => () => void
+  /** @returns the seq currently armed for a rewrite, or undefined. */
+  armedTarget: () => number | undefined
 }
 
 /**
@@ -201,6 +212,49 @@ const PENDING = new Map<string, Map<number, number>>()
 const PENDING_TTL_MS = 5 * 60 * 1000
 
 /**
+ * The message each Session currently has armed for a rewrite, plus a tiny
+ * external store so the still-visible row can render a cancel control.
+ *
+ * The row is deliberately *not* hidden while armed: hiding it put the only
+ * affordance for abandoning the edit off screen (and inside a hidden container,
+ * where a fixed-position control is clipped too). Keeping the row visible and
+ * offering "cancel" in its action row makes leaving an edit possible.
+ */
+const ARMED = new Map<string, number>()
+const ARMED_REVISION = new Map<string, number>()
+const ARMED_LISTENERS = new Map<string, Set<() => void>>()
+
+/** @returns the armed seq for a Session, or undefined. */
+function armedGet(sessionId: string): number | undefined {
+  return ARMED.get(sessionId)
+}
+
+/** Arm (or clear, with no seq) one Session's rewrite target. */
+function armedSet(sessionId: string, seq?: number): void {
+  if (seq === undefined) ARMED.delete(sessionId)
+  else ARMED.set(sessionId, seq)
+  ARMED_REVISION.set(sessionId, (ARMED_REVISION.get(sessionId) ?? 0) + 1)
+  const listeners = ARMED_LISTENERS.get(sessionId)
+  if (listeners !== undefined) for (const listener of listeners) listener()
+}
+
+/** Subscribe to one Session's arm-state changes. */
+function armedSubscribe(sessionId: string, listener: () => void): () => void {
+  let listeners = ARMED_LISTENERS.get(sessionId)
+  if (listeners === undefined) {
+    listeners = new Set()
+    ARMED_LISTENERS.set(sessionId, listeners)
+  }
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+/** @returns the arm-state revision, a safe `useSyncExternalStore` snapshot. */
+function armedRevision(sessionId: string): number {
+  return ARMED_REVISION.get(sessionId) ?? 0
+}
+
+/**
  * Whether an armed message is waiting for its send.
  * @param sessionId - owning Session.
  * @param seq - message seq to test.
@@ -218,6 +272,8 @@ interface RangeFeed {
   readonly revision: () => number
   /** Hide `seq` until the send writes its replacement, or the arm expires. */
   readonly markPending: (seq: number) => void
+  /** Forget a locally hidden `seq` without waiting for its arm to expire. */
+  readonly cancelPending: (seq: number) => void
 }
 
 /**
@@ -408,7 +464,7 @@ function CheckIcon() {
 function RedoUserMessage({
   node, renderFactorySlot, loadImage, t, resend, arm, laterTurns, subscribeRunning, isRunning,
   sessionId, localeId, inputActions, useInput, subscribeSuperseded, supersededRevision, isHidden,
-  shadowedCommandKeys, retractionTurns,
+  shadowedCommandKeys, retractionTurns, isPending, cancelArm, subscribeArmed, armedTarget,
 }: RedoUserMessageProps) {
   const data = node.data as UserMessageNode & {
     readonly referenceLabels?: readonly string[]
@@ -431,6 +487,8 @@ function RedoUserMessage({
   // waiting for its own data to change.
   useSyncExternalStore(subscribeSuperseded, supersededRevision)
   const hidden = isHidden(data.seq)
+  // The armed row stays visible; this only drives the cancel control.
+  const armedSeq = useSyncExternalStore(subscribeArmed, armedTarget)
   // Only the fields that matter here: the published input state carries much
   // more, and depending on the whole shape would break on an upstream addition.
   const composerOccupied = useInput((state: { readonly draft: string; readonly attachmentIds: readonly unknown[] }) =>
@@ -676,6 +734,23 @@ function RedoUserMessage({
             />
           </svg>
         </button>
+        {armedSeq === data.seq
+          ? (
+            <button
+              type="button"
+              className="dsh-redo-button dsh-redo-small"
+              aria-label={t('action.cancel')}
+              title={t('action.cancel')}
+              onClick={(event) => {
+                event.stopPropagation()
+                inputActions.setDraft('')
+                cancelArm(data.seq)
+              }}
+            >
+              {t('action.cancel')}
+            </button>
+          )
+          : null}
       </div>
       {pending === undefined
         ? null
@@ -961,6 +1036,14 @@ export function apply(ctx: Context): void {
         // advisory state, so it may be dropped with the page.
         ;(timer as { unref?: () => void }).unref?.()
       },
+      // Abandoning the edit: the log never said the message was gone, so
+      // dropping the local mark is enough to bring the row back immediately.
+      cancelPending: (seq) => {
+        if (pending.get(seq) === undefined) return
+        pending.delete(seq)
+        revision += 1
+        for (const listener of listeners) listener()
+      },
     }
     rangeFeeds.set(id, feed)
     return feed
@@ -1029,6 +1112,18 @@ export function apply(ctx: Context): void {
       isHidden: (seq) => isSupersededSeq(sessionId, seq) || isPendingSeq(sessionId, seq),
       shadowedCommandKeys: shadowedCommandKeys(sessionId),
       retractionTurns: retractionTurns(sessionId),
+      isPending: (seq) => isPendingSeq(sessionId, seq),
+      subscribeArmed: (listener) => armedSubscribe(sessionId, listener),
+      armedTarget: () => armedGet(sessionId),
+      cancelArm: (target) => {
+        // Drop the local arm first so the row updates immediately; then disarm
+        // the Host so the next send is an ordinary message. A failed command
+        // must not keep the row stuck in "armed" state.
+        armedSet(sessionId, undefined)
+        rangeFeed(sessionId).cancelPending(target)
+        void remoteCommands(ctx).commands.execute(sessionId as SessionId, '/redo off', [])
+          .catch(() => undefined)
+      },
       laterTurns: (target) => {
         const binding = clientSessions(ctx).binding(sessionId as SessionId)
         if (binding === undefined) return undefined
@@ -1082,10 +1177,9 @@ export function apply(ctx: Context): void {
           [],
         ))
         if (!verdict.ok) return verdict
-        // Nothing in the log says this message is gone yet, so the row hides on
-        // the local arm and hands the job to the event window once the
-        // replacement lands (or reappears when the arm expires unsent).
-        rangeFeed(sessionId).markPending(target)
+        // The row stays visible while the rewrite is armed (see ARMED above), so
+        // the user can still abandon it from the message's own action row.
+        armedSet(sessionId, target)
         return { ok: true, draftIds: drafts.map(draft => draft.id) }
       },
       resend: async (target, parts) => {
